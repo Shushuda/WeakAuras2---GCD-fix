@@ -393,44 +393,46 @@ function ConstructFunction(prototype, trigger)
     tinsert(tests, "("..table.concat(orConjunctionGroup, " or ")..")")
   end
 
-  local ret = preambles .. "return function("..tconcat(input, ", ")..")\n";
-  ret = ret..(init or "");
+  local ret = {preambles .. "return function("..tconcat(input, ", ")..")\n"}
+  if init then
+    table.insert(ret, init)
+  end
+  if #debug > 0 then
+    table.insert(ret, tconcat(debug, "\n") or "")
+  end
 
-  ret = ret..(#debug > 0 and tconcat(debug, "\n") or "");
-
-  ret = ret.."if(";
-  ret = ret..((#required > 0) and tconcat(required, " and ").." and " or "");
-  ret = ret..(#tests > 0 and tconcat(tests, " and ") or "true");
-  ret = ret..") then\n";
+  table.insert(ret, "if("..((#required > 0) and tconcat(required, " and ").." and " or ""))
+  table.insert(ret, #tests > 0 and tconcat(tests, " and ") or "true")
+  table.insert(ret, ") then\n")
   if(#debug > 0) then
-    ret = ret.."print('ret: true');\n";
+    table.insert("print('ret: true');\n")
   end
 
   if (prototype.statesParameter == "all") then
-    ret = ret .. "  state[cloneId] = state[cloneId] or {}\n"
-    ret = ret .. "  state = state[cloneId]\n"
-    ret = ret .. "  state.changed = true\n"
+    table.insert(ret, "  state[cloneId] = state[cloneId] or {}\n")
+    table.insert(ret, "  state = state[cloneId]\n")
+    table.insert(ret, "  state.changed = true\n")
   end
 
   if prototype.countEvents then
-    ret = ret .. "  local count = counter:GetNext()\n"
+    table.insert(ret, "  local count = counter:GetNext()\n")
     if trigger.use_count and type(trigger.count) == "string" and trigger.count ~= "" then
-      ret = ret .. "  local match = counter:Match()"
-      ret = ret .. "  if not match then return false end\n"
+      table.insert(ret, "  local match = counter:Match()")
+      table.insert(ret, "  if not match then return false end\n")
     end
-    ret = ret .. "  state.count = count\n"
-    ret = ret .. "  state.changed = true\n"
+    table.insert(ret, "  state.count = count\n")
+    table.insert(ret, "  state.changed = true\n")
   end
 
   for _, v in ipairs(store) do
-    ret = ret .. "    if (state." .. v .. " ~= " .. v .. ") then\n"
-    ret = ret .. "      state." .. v .. " = " .. v .. "\n"
-    ret = ret .. "      state.changed = true\n"
-    ret = ret .. "    end\n"
+    table.insert(ret, "    if (state." .. v .. " ~= " .. v .. ") then\n")
+    table.insert(ret, "      state." .. v .. " = " .. v .. "\n")
+    table.insert(ret, "      state.changed = true\n")
+    table.insert(ret, "    end\n")
   end
-  ret = ret.."return true else return false end end";
+  table.insert(ret, "return true else return false end end")
 
-  return ret;
+  return table.concat(ret);
 end
 
 function Private.EndEvent(state)
@@ -2831,12 +2833,22 @@ do
     return runeDuration;
   end
 
+  local GetSpellCharges = GetSpellCharges or function(id)
+    local chargeInfo = C_Spell.GetSpellCharges(id)
+    if not chargeInfo then return end
+    return chargeInfo.currentCharges, chargeInfo.maxCharges, chargeInfo.cooldownStartTime, chargeInfo.cooldownDuration, chargeInfo.chargeModRate
+  end
+  local GetSpellCount = GetSpellCount or C_Spell.GetSpellCastCount
+
   ---@param id string
   ---@param runeDuration? number
   function WeakAuras.GetSpellCooldownUnified(id, runeDuration)
     local startTimeCooldown, durationCooldown, enabled, modRate
     if GetSpellCooldown then
       startTimeCooldown, durationCooldown, enabled, modRate = GetSpellCooldown(id)
+      if type(enabled) == "number" then
+        enabled = enabled == 1 and true or false
+      end
     else
       local spellCooldownInfo = C_Spell.GetSpellCooldown(id);
       if spellCooldownInfo then
@@ -2882,8 +2894,8 @@ do
     -- For Evoker, using an empowered spell puts spells on pause. Some spells are put on an entirely bogus 0.5 paused cd
     -- Others the real cd (that continues ticking) is paused.
     -- We treat anything with less than 0.5 as not on cd, and hope for the best.
-    if enabled == 0 and durationCooldown <= 0.5 then
-      startTimeCooldown, durationCooldown, enabled = 0, 0, 1
+    if not enabled and durationCooldown <= 0.5 then
+      startTimeCooldown, durationCooldown, enabled = 0, 0, true
     end
 
     local onNonGCDCD = durationCooldown and startTimeCooldown and durationCooldown > 0 and (durationCooldown ~= gcdDuration or startTimeCooldown ~= gcdStart);
@@ -2917,7 +2929,7 @@ do
 
     return charges, maxCharges, startTime, duration, unifiedCooldownBecauseRune,
            startTimeCooldown, durationCooldown, cooldownBecauseRune, startTimeCharges, durationCharges,
-           count, unifiedModRate, modRate, modRateCharges, enabled == 0
+           count, unifiedModRate, modRate, modRateCharges, not enabled
   end
 
   ---@type fun()
@@ -2931,7 +2943,7 @@ do
       else
         local spellId = select(7, Private.ExecEnv.GetSpellInfo(id))
         if spellId then
-          override = FindSpellOverrideByID(spellId)
+          override = Private.ExecEnv.GetSpellName(FindSpellOverrideByID(spellId))
         end
       end
       if id ~= override and override and not spells[override] then
@@ -2970,8 +2982,32 @@ do
         end
       end
 
+      local baseSpell
+      if type(id) == "number" then
+        baseSpell = FindBaseSpellByID(id)
+        if baseSpell == id or not checkOverrideSpell[baseSpell] then
+          baseSpell = nil
+        end
+      else
+        local spellId = select(7, Private.ExecEnv.GetSpellInfo(id))
+        if spellId then
+          baseSpell = Private.ExecEnv.GetSpellName(FindBaseSpellByID(spellId))
+        end
+        if baseSpell == id or not checkOverrideSpell[baseSpell] then
+          baseSpell = nil
+        end
+      end
+
+      if spellDetails[id].baseSpell ~= baseSpell then
+        spellDetails[id].baseSpell = baseSpell
+        changed = true
+      end
+
       if changed and not WeakAuras.IsPaused() then
-        Private.ScanEventsByID("SPELL_COOLDOWN_CHANGED", id)
+        Private.ScanEventsByID("SPELL_COOLDOWN_CHANGED", id, id)
+        if baseSpell then
+          Private.ScanEventsByID("SPELL_COOLDOWN_CHANGED", baseSpell, id)
+        end
       end
     end
   end
@@ -3017,15 +3053,27 @@ do
 
     if not WeakAuras.IsPaused() then
       if nowReady then
-        Private.ScanEventsByID("SPELL_COOLDOWN_READY", id)
+        Private.ScanEventsByID("SPELL_COOLDOWN_READY", id, id)
+        local baseSpell = spellDetails[id].baseSpell
+        if (baseSpell) then
+          Private.ScanEventsByID("SPELL_COOLDOWN_READY", baseSpell, id)
+        end
       end
 
       if changed or chargesChanged then
-        Private.ScanEventsByID("SPELL_COOLDOWN_CHANGED", id)
+        Private.ScanEventsByID("SPELL_COOLDOWN_CHANGED", id, id)
+        local baseSpell = spellDetails[id].baseSpell
+        if (baseSpell) then
+          Private.ScanEventsByID("SPELL_COOLDOWN_CHANGED", baseSpell, id)
+        end
       end
 
       if (chargesDifference ~= 0 ) then
-        Private.ScanEventsByID("SPELL_CHARGES_CHANGED", id, chargesDifference, charges or spellCount or 0);
+        Private.ScanEventsByID("SPELL_CHARGES_CHANGED", id, id, chargesDifference, charges or spellCount or 0);
+        local baseSpell = spellDetails[id].baseSpell
+        if (baseSpell) then
+          Private.ScanEventsByID("SPELL_CHARGES_CHANGED", baseSpell, id, chargesDifference, charges or spellCount or 0);
+        end
       end
     end
   end
@@ -3229,7 +3277,7 @@ do
       return;
     end
     spells[id] = true;
-    checkOverrideSpell[id] = followoverride
+    checkOverrideSpell[id] = followoverride or checkOverrideSpell[id]
     local name, _, icon, _, _, _, spellId = Private.ExecEnv.GetSpellInfo(id)
     spellDetails[id] = {
       name = name,
@@ -3752,6 +3800,8 @@ if WeakAuras.IsClassicEra() then
   end
 end
 
+local GetSpellPowerCost = GetSpellPowerCost or C_Spell and C_Spell.GetSpellPowerCost
+
 ---@param powerTypeToCheck integer
 ---@return number? cost
 function WeakAuras.GetSpellCost(powerTypeToCheck)
@@ -3761,10 +3811,12 @@ function WeakAuras.GetSpellCost(powerTypeToCheck)
   end
   if spellID then
     local costTable = GetSpellPowerCost(spellID);
-    for _, costInfo in pairs(costTable) do
-      -- When there is no required aura for a power cost, the API returns an aura ID of 0 and false for hasRequiredAura despite being valid.
-      if costInfo.type == powerTypeToCheck and (costInfo.requiredAuraID == 0 or costInfo.hasRequiredAura) then
-        return costInfo.cost;
+    if costTable then
+      for _, costInfo in pairs(costTable) do
+        -- When there is no required aura for a power cost, the API returns an aura ID of 0 and false for hasRequiredAura despite being valid.
+        if costInfo.type == powerTypeToCheck and (costInfo.requiredAuraID == 0 or costInfo.hasRequiredAura) then
+          return costInfo.cost;
+        end
       end
     end
   end
@@ -4329,11 +4381,9 @@ end
 ---@type fun(data: auraData, triggernum: number): string
 function GenericTrigger.GetAdditionalProperties(data, triggernum)
   local trigger = data.triggers[triggernum].trigger
-  local ret = "";
+  local ret = {""};
   local prototype = GenericTrigger.GetPrototype(trigger)
   if prototype then
-    local found = false;
-    local additional = ""
     for _, v in pairs(prototype.args) do
       local enable = true
       if(type(v.enable) == "function") then
@@ -4342,18 +4392,13 @@ function GenericTrigger.GetAdditionalProperties(data, triggernum)
         enable = v.enable
       end
       if (enable and v.store and v.name and v.display and v.conditionType ~= "bool") then
-        found = true;
-        additional = additional .. "|cFFFFCC00%".. triggernum .. "." .. v.name .. "|r - " .. v.display .. "\n";
+        table.insert(ret .. "|cFFFFCC00%".. triggernum .. "." .. v.name .. "|r - " .. v.display .. "\n")
       end
     end
     if prototype.countEvents then
-      found = true;
-      additional = additional .. "|cFFFFCC00%".. triggernum .. ".count|r - " .. L["Count"] .. "\n";
+      table.insert(ret, "|cFFFFCC00%".. triggernum .. ".count|r - " .. L["Count"] .. "\n")
     end
 
-    if (found) then
-      ret = ret .. additional;
-    end
   else
     if (trigger.custom_type == "stateupdate") then
       local variables = GenericTrigger.GetTsuConditionVariables(data.id, triggernum)
@@ -4361,7 +4406,7 @@ function GenericTrigger.GetAdditionalProperties(data, triggernum)
         for var, varData in pairs(variables) do
           if (type(varData) == "table") then
             if varData.display then
-              ret = ret .. "|cFFFFCC00%".. triggernum .. "." .. var .. "|r - " .. varData.display .. "\n"
+              table.insert(ret, "|cFFFFCC00%".. triggernum .. "." .. var .. "|r - " .. varData.display .. "\n")
             end
           end
         end
@@ -4369,7 +4414,7 @@ function GenericTrigger.GetAdditionalProperties(data, triggernum)
     end
   end
 
-  return ret;
+  return table.concat(ret);
 end
 
 function GenericTrigger.GetProgressSources(data, triggernum, values)

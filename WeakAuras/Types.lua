@@ -1635,15 +1635,31 @@ local function InitializeReputations()
   ---@type table<string, boolean>
   Private.reputations_headers = {}
 
-  local collapsed = {}
-  for i = 1, Private.ExecEnv.GetNumFactions() do
-    local factionData = Private.ExecEnv.GetFactionDataByIndex(i)
-    if factionData.isCollapsed then
-      collapsed[factionData.name] = true
-    end
+  -- Ensure all factions are shown by adjusting filters
+  local showLegacy = true
+  if not Private.ExecEnv.AreLegacyReputationsShown() then
+    showLegacy = false
+    C_Reputation.SetLegacyReputationsShown(true)
+  end
+  local sortType = 0
+  if Private.ExecEnv.GetReputationSortType() > 0 then
+    sortType = Private.ExecEnv.GetReputationSortType()
+    C_Reputation.SetReputationSortType(0)
   end
 
-  Private.ExecEnv.ExpandAllFactionHeaders()
+  -- Dynamic expansion of all collapsed headers
+  local collapsed = {}
+  local index = 1
+  while index <= Private.ExecEnv.GetNumFactions() do
+    local factionData = Private.ExecEnv.GetFactionDataByIndex(index)
+    if factionData.isHeader and factionData.isCollapsed then
+      Private.ExecEnv.ExpandFactionHeader(index)
+      collapsed[factionData.name] = true
+    end
+    index = index + 1
+  end
+
+  -- Process all faction data
   for i = 1, Private.ExecEnv.GetNumFactions() do
     local factionData = Private.ExecEnv.GetFactionDataByIndex(i)
     if factionData.currentStanding > 0 or not factionData.isHeader then
@@ -1660,11 +1676,20 @@ local function InitializeReputations()
     end
   end
 
+  -- Collapse headers back to their original state
   for i = Private.ExecEnv.GetNumFactions(), 1, -1 do
     local factionData = Private.ExecEnv.GetFactionDataByIndex(i)
     if collapsed[factionData.name] then
       Private.ExecEnv.CollapseFactionHeader(i)
     end
+  end
+
+  -- Restore filters if they were changed
+  if not showLegacy then
+    C_Reputation.SetLegacyReputationsShown(false)
+  end
+  if sortType > 0 then
+    C_Reputation.SetReputationSortType(sortType)
   end
 end
 
@@ -2806,7 +2831,8 @@ Private.TocToExpansion = {
    [7] = L["Legion"],
    [8] = L["Battle for Azeroth"],
    [9] = L["Shadowlands"],
-  [10] = L["Dragonflight"]
+  [10] = L["Dragonflight"],
+  [11] = L["The War Within"]
 }
 
 ---@type table<string, string>
@@ -3149,7 +3175,8 @@ LSM:Register("font", "Fira Sans Black", "Interface\\Addons\\WeakAuras\\Media\\Fo
 LSM:Register("font", "Fira Sans Condensed Black", "Interface\\Addons\\WeakAuras\\Media\\Fonts\\FiraSansCondensed-Black.ttf", LSM.LOCALE_BIT_western + LSM.LOCALE_BIT_ruRU)
 LSM:Register("font", "Fira Sans Condensed Medium", "Interface\\Addons\\WeakAuras\\Media\\Fonts\\FiraSansCondensed-Medium.ttf", LSM.LOCALE_BIT_western + LSM.LOCALE_BIT_ruRU)
 LSM:Register("font", "Fira Sans Medium", "Interface\\Addons\\WeakAuras\\Media\\Fonts\\FiraSans-Medium.ttf", LSM.LOCALE_BIT_western + LSM.LOCALE_BIT_ruRU)
-
+LSM:Register("font", "PT Sans Narrow Regular", "Interface\\Addons\\WeakAuras\\Media\\Fonts\\PTSansNarrow-Regular.ttf", LSM.LOCALE_BIT_western + LSM.LOCALE_BIT_ruRU)
+LSM:Register("font", "PT Sans Narrow Bold", "Interface\\Addons\\WeakAuras\\Media\\Fonts\\PTSansNarrow-Bold.ttf", LSM.LOCALE_BIT_western + LSM.LOCALE_BIT_ruRU)
 
 -- register plain white border
 LSM:Register("border", "Square Full White", [[Interface\AddOns\WeakAuras\Media\Textures\Square_FullWhite.tga]])

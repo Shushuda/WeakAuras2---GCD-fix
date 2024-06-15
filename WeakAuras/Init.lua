@@ -170,8 +170,9 @@ Private.frames = {}
 --- @field subeventSuffix string?
 --- @field type triggerTypes
 --- @field unit string?
---- @field use_showOn boolean|nil
 --- @field use_alwaystrue boolean|nil
+--- @field use_ignoreoverride boolean|nil
+--- @field use_showOn boolean|nil
 
 ---@class prototypeDataArgs
 ---@field name string
@@ -191,11 +192,12 @@ Private.frames = {}
 ---@field timedrequired boolean?
 ---@field GetNameAndIcon (fun(trigger: triggerData): string?, string?)|nil
 ---@field iconFunc (fun(trigger: triggerData): string?)|nil
+---@field loadFunc (fun(trigger: triggerData): nil)|nil
 ---@field nameFunc (fun(trigger: triggerData): string?)|nil
 ---@field events (fun(trigger: triggerData): table)|nil
 ---@field internal_events (fun(trigger: triggerData): table)|nil
 ---@field name string
----@field statesParamater "unit"|"one"|"all"|nil
+---@field statesParameter "unit"|"one"|"all"|nil
 ---@field progressType "timed"|"static"|"none"
 
 --- @class triggerUntriggerData
@@ -538,7 +540,7 @@ function WeakAuras.IsLibsOK()
   return libsAreOk
 end
 
-if not WeakAuras.IsLibsOK() then
+if not libsAreOk then
   C_Timer.After(1, function()
     WeakAuras.prettyPrint("WeakAuras is missing necessary libraries. Please reinstall a proper package.")
   end)
