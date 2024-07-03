@@ -124,9 +124,12 @@ Private.precision_types = {
 ---@type table<string, string>
 Private.big_number_types = {
   ["AbbreviateNumbers"] = L["AbbreviateNumbers (Blizzard)"],
-  ["AbbreviateLargeNumbers"] = L["AbbreviateLargeNumbers (Blizzard)"]
+  ["AbbreviateLargeNumbers"] = L["AbbreviateLargeNumbers (Blizzard)"],
+  ["BreakUpLargeNumbers"] = L["BreakUpLargeNumbers (Blizzard)"],
 }
-
+if WeakAuras.IsClassicEra() then
+  Private.big_number_types.BreakUpLargeNumbers = nil
+end
 ---@type table<string, string>
 Private.round_types = {
   floor = L["Floor"],
@@ -218,6 +221,10 @@ local simpleFormatters = {
   AbbreviateLargeNumbers = function(value)
     if type(value) == "string" then value = tonumber(value) end
     return (type(value) == "number") and AbbreviateLargeNumbers(Round(value)) or value
+  end,
+  BreakUpLargeNumbers = function(value)
+    if type(value) == "string" then value = tonumber(value) end
+    return (type(value) == "number") and BreakUpLargeNumbers(value) or value
   end,
   floor = function(value)
     if type(value) == "string" then value = tonumber(value) end
@@ -517,6 +524,8 @@ Private.format_types = {
       local format = get(symbol .. "_big_number_format", "AbbreviateNumbers")
       if (format == "AbbreviateNumbers") then
         return simpleFormatters.AbbreviateNumbers
+      elseif (format == "BreakUpLargeNumbers") then
+        return simpleFormatters.BreakUpLargeNumbers
       end
       return simpleFormatters.AbbreviateLargeNumbers
     end
@@ -1122,6 +1131,8 @@ do
     [37] = true,
     [52] = true, -- Dracthyr
     [70] = true, -- Dracthyr
+    [84] = true, -- Earthen
+    [85] = true, -- Earthen
   }
 
   for raceId, enabled in pairs(races) do
@@ -3165,8 +3176,23 @@ LSM.RegisterCallback(WeakAuras, "LibSharedMedia_Registered", function(_, mediaty
       Private.sound_types[path] = key
       Private.sound_file_types[path] = key
     end
+  elseif mediatype == "statusbar" or mediatype == "statusbar_atlas" then
+    local path = LSM:Fetch(mediatype, key)
+    if path then
+      Private.texture_types["LibSharedMedia Textures"][path] = key
+    end
   end
 end)
+
+Private.texture_types["LibSharedMedia Textures"] = {}
+for _, mediaType in ipairs{"statusbar", "statusbar_atlas"} do
+  local mediaTable = LSM:HashTable(mediaType)
+  if mediaTable then
+    for name, path in pairs(mediaTable) do
+      Private.texture_types["LibSharedMedia Textures"][path] = name
+    end
+  end
+end
 
 -- register options font
 LSM:Register("font", "Fira Mono Medium", "Interface\\Addons\\WeakAuras\\Media\\Fonts\\FiraMono-Medium.ttf", LSM.LOCALE_BIT_western + LSM.LOCALE_BIT_ruRU)
@@ -3202,11 +3228,16 @@ if PowerBarColor then
   end
 
   for power, data in pairs(PowerBarColor) do
+    local name, path
     if type(power) == "string" and data.atlas then
-      local name = "Blizzard " .. capitalizeFirstLetter(power)
-      LSM:Register("statusbar_atlas", name, data.atlas)
+      name = "Blizzard " .. capitalizeFirstLetter(power)
+      path = data.atlas
     elseif data.atlasElementName then
-      LSM:Register("statusbar_atlas", "Blizzard " .. data.atlasElementName, "UI-HUD-UnitFrame-Player-PortraitOff-Bar-" .. data.atlasElementName)
+      name = "Blizzard " .. data.atlasElementName
+      path = "UI-HUD-UnitFrame-Player-PortraitOff-Bar-" .. data.atlasElementName
+    end
+    if name and path then
+      LSM:Register("statusbar_atlas", name, path)
     end
   end
 end
