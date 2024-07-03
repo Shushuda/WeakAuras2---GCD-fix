@@ -65,6 +65,8 @@ globals = {
 	"WeakAurasProfilingReportMixin",
 	"WeakAurasProfilingLineMixin",
 	-- Third Party Addons/Libs
+	"APIDocumentation",
+	"APIDocumentation_LoadUI",
 	"BigWigs",
 	"BigWigsLoader",
 	"CUSTOM_CLASS_COLORS",
@@ -88,6 +90,7 @@ globals = {
 	"CombatLogGetCurrentEventInfo",
 	"CombatText_AddMessage",
 	"CooldownFrame_Set",
+	"ColorMixin",
 	"CreateColor",
 	"CreateAndInitFromMixin",
 	"CreateFromMixins",

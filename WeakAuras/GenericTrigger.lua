@@ -54,15 +54,11 @@ local Private = select(2, ...)
 -- Lua APIs
 local tinsert, tconcat, wipe = table.insert, table.concat, wipe
 local tostring, pairs, type = tostring, pairs, type
-local error, setmetatable = error, setmetatable
+local error = error
 local CombatLogGetCurrentEventInfo = CombatLogGetCurrentEventInfo;
 
 -- WoW APIs
 local IsPlayerMoving = IsPlayerMoving
-
-WeakAurasAceEvents = setmetatable({}, {__tostring=function() return "WeakAuras" end});
-LibStub("AceEvent-3.0"):Embed(WeakAurasAceEvents);
-local aceEvents = WeakAurasAceEvents
 
 ---@class WeakAuras
 local WeakAuras = WeakAuras;
@@ -2932,6 +2928,11 @@ do
            count, unifiedModRate, modRate, modRateCharges, not enabled
   end
 
+  local function FindSpellOverrideByIDOrNil(spellId)
+    local override = FindSpellOverrideByID(spellId)
+    return override ~= spellId and override or nil
+  end
+
   ---@type fun()
   function Private.CheckSpellKnown()
     local overrides = {}
@@ -2939,14 +2940,15 @@ do
     for id, _ in pairs(checkOverrideSpell) do
       local override
       if type(id) == "number" then
-        override = FindSpellOverrideByID(id)
+        override = FindSpellOverrideByIDOrNil(id)
       else
         local spellId = select(7, Private.ExecEnv.GetSpellInfo(id))
         if spellId then
-          override = Private.ExecEnv.GetSpellName(FindSpellOverrideByID(spellId))
+          local overrideSpellId = FindSpellOverrideByIDOrNil(spellId)
+          override = overrideSpellId and Private.ExecEnv.GetSpellName(overrideSpellId) or nil
         end
       end
-      if id ~= override and override and not spells[override] then
+      if override and not spells[override] then
         WeakAuras.WatchSpellCooldown(override, false, false)
       end
       overrides[id] = override
@@ -3287,9 +3289,12 @@ do
 
     if followoverride then
       if type(id) == "number" then
-        spellDetails[id].override = FindSpellOverrideByID(id)
+        spellDetails[id].override = FindSpellOverrideByIDOrNil(id)
       else
-        spellDetails[id].override = spellId and FindSpellOverrideByID(spellId) or nil
+        if spellId then
+          local overrideSpellId = FindSpellOverrideByIDOrNil(spellId)
+          spellDetails[id].override = overrideSpellId and Private.ExecEnv.GetSpellName(overrideSpellId) or nil
+        end
       end
     end
 
@@ -3341,7 +3346,7 @@ do
         startTime, duration = 0, 0
       end
       itemCdEnabled[id] = enabled;
-      if(duration > 0 and duration > 1.5 and duration ~= WeakAuras.gcdDuration()) then
+      if(duration and duration > 0 and duration > 1.5 and duration ~= WeakAuras.gcdDuration()) then
         local time = GetTime();
         local endTime = startTime + duration;
         itemCdDurs[id] = duration;
@@ -3454,6 +3459,7 @@ function WeakAuras.WatchUnitChange(unit)
     watchUnitChange:RegisterEvent("PLAYER_TARGET_CHANGED")
     if not WeakAuras.IsClassicEra() then
       watchUnitChange:RegisterEvent("PLAYER_FOCUS_CHANGED")
+      watchUnitChange:RegisterEvent("ARENA_OPPONENT_UPDATE")
     end
     watchUnitChange:RegisterEvent("PLAYER_ROLES_ASSIGNED")
     watchUnitChange:RegisterEvent("PLAYER_SOFT_ENEMY_CHANGED")
@@ -3475,14 +3481,18 @@ function WeakAuras.WatchUnitChange(unit)
         eventsToSend["UNIT_CHANGED_" .. unitA] = unitA
         if watchUnitChange.GUIDToUnitIds[oldGUID] then
           for unitB in pairs(watchUnitChange.GUIDToUnitIds[oldGUID]) do
-            eventsToSend["UNIT_IS_UNIT_CHANGED_" .. unitA .. "_" .. unitB] = unitA
-            eventsToSend["UNIT_IS_UNIT_CHANGED_" .. unitB .. "_" .. unitA] = unitB
+            if unitA ~= unitB then
+              eventsToSend["UNIT_IS_UNIT_CHANGED_" .. unitA .. "_" .. unitB] = unitA
+              eventsToSend["UNIT_IS_UNIT_CHANGED_" .. unitB .. "_" .. unitA] = unitB
+            end
           end
         end
         if watchUnitChange.GUIDToUnitIds[newGUID] then
           for unitB in pairs(watchUnitChange.GUIDToUnitIds[newGUID]) do
-            eventsToSend["UNIT_IS_UNIT_CHANGED_" .. unitA .. "_" .. unitB] = unitA
-            eventsToSend["UNIT_IS_UNIT_CHANGED_" .. unitB .. "_" .. unitA] = unitB
+            if unitA ~= unitB then
+              eventsToSend["UNIT_IS_UNIT_CHANGED_" .. unitA .. "_" .. unitB] = unitA
+              eventsToSend["UNIT_IS_UNIT_CHANGED_" .. unitB .. "_" .. unitA] = unitB
+            end
           end
         end
       end
@@ -3556,107 +3566,79 @@ function WeakAuras.WatchUnitChange(unit)
       end
     end
 
-    watchUnitChange:SetScript("OnEvent", function(self, event, unit)
-      Private.StartProfileSystem("generictrigger unit change");
-      local eventsToSend = {}
-      if event == "PLAYER_ENTERING_WORLD" then
+    local function handleUnit(unit, eventsToSend, ...)
+      if watchUnitChange.trackedUnits[unit] then
+        local fn
+        for i = 1, select("#", ...) do
+          fn = select(i, ...)
+          fn(unit, eventsToSend)
+        end
+      end
+    end
+
+    local handleEvent = {
+      PLAYER_ENTERING_WORLD = function(_, eventsToSend)
         for unit in pairs(watchUnitChange.unitIdToGUID) do
-          unitUpdate(unit, eventsToSend)
-          markerUpdate(unit, eventsToSend)
-          reactionUpdate(unit, eventsToSend)
+          handleUnit(unit, eventsToSend, unitUpdate, markerUpdate, reactionUpdate)
         end
-      elseif event == "NAME_PLATE_UNIT_ADDED" then
-        if not watchUnitChange.trackedUnits[unit] then
-          Private.StopProfileSystem("generictrigger unit change");
-          return
-        end
-        unitUpdate(unit, eventsToSend)
-        markerInit(unit)
-        reactionInit(unit)
-      elseif event == "NAME_PLATE_UNIT_REMOVED" then
-        if not watchUnitChange.trackedUnits[unit] then
-          Private.StopProfileSystem("generictrigger unit change");
-          return
-        end
-        unitUpdate(unit, eventsToSend)
-        markerClear(unit)
-        reactionClear(unit)
-      elseif event == "INSTANCE_ENCOUNTER_ENGAGE_UNIT" then
+      end,
+      NAME_PLATE_UNIT_ADDED = function(unit, eventsToSend)
+        handleUnit(unit, eventsToSend, unitUpdate, markerInit, reactionInit)
+      end,
+      NAME_PLATE_UNIT_REMOVED = function(unit, eventsToSend)
+        handleUnit(unit, eventsToSend, unitUpdate, markerClear, reactionClear)
+      end,
+      INSTANCE_ENCOUNTER_ENGAGE_UNIT = function(_, eventsToSend)
         for i = 1, 5 do
-          local unit = "boss" .. i
-          if watchUnitChange.trackedUnits[unit] then
-            unitUpdate(unit, eventsToSend)
-            markerInit(unit)
-            reactionInit(unit)
-          end
+          handleUnit("boss" .. i, eventsToSend, unitUpdate, markerInit, reactionInit)
+          handleUnit("boss" .. i .. "target", eventsToSend, unitUpdate, markerInit, reactionInit)
         end
-      elseif event == "PLAYER_TARGET_CHANGED" then
-        if not watchUnitChange.trackedUnits["target"] then
-          Private.StopProfileSystem("generictrigger unit change");
-          return
-        end
-        unitUpdate("target", eventsToSend)
-        markerInit("target")
-        reactionInit("target")
-      elseif event == "PLAYER_FOCUS_CHANGED" then
-        if not watchUnitChange.trackedUnits["focus"] then
-          Private.StopProfileSystem("generictrigger unit change");
-          return
-        end
-        unitUpdate("focus", eventsToSend)
-        markerInit("focus")
-        reactionInit("focus")
-      elseif event == "PLAYER_SOFT_ENEMY_CHANGED" then
-        if not watchUnitChange.trackedUnits["softenemy"] then
-          Private.StopProfileSystem("generictrigger unit change");
-          return
-        end
-        unitUpdate("softenemy", eventsToSend)
-        markerInit("softenemy")
-        reactionInit("softenemy")
-      elseif event == "PLAYER_SOFT_FRIEND_CHANGED" then
-        if not watchUnitChange.trackedUnits["softfriend"] then
-          Private.StopProfileSystem("generictrigger unit change");
-          return
-        end
-        unitUpdate("softfriend", eventsToSend)
-        markerInit("softfriend")
-        reactionInit("softfriend")
-      elseif event == "RAID_TARGET_UPDATE" then
+      end,
+      ARENA_OPPONENT_UPDATE = function(unit, eventsToSend)
+        handleUnit(unit, eventsToSend, unitUpdate, markerInit, reactionInit)
+        handleUnit(unit .. "target", eventsToSend, unitUpdate, markerInit, reactionInit)
+      end,
+      PLAYER_TARGET_CHANGED = function(_, eventsToSend)
+        handleUnit("target", eventsToSend, unitUpdate, markerInit, reactionInit)
+        handleUnit("targettarget", eventsToSend, unitUpdate, markerInit, reactionInit)
+      end,
+      PLAYER_FOCUS_CHANGED = function(_, eventsToSend)
+        handleUnit("focus", eventsToSend, unitUpdate, markerInit, reactionInit)
+        handleUnit("focustarget", eventsToSend, unitUpdate, markerInit, reactionInit)
+      end,
+      PLAYER_SOFT_ENEMY_CHANGED = function(_, eventsToSend)
+        handleUnit("softenemy", eventsToSend, unitUpdate, markerInit, reactionInit)
+        handleUnit("softenemytarget", eventsToSend, unitUpdate, markerInit, reactionInit)
+      end,
+      PLAYER_SOFT_FRIEND_CHANGED = function(_, eventsToSend)
+        handleUnit("softfriend", eventsToSend, unitUpdate, markerInit, reactionInit)
+        handleUnit("softfriendtarget", eventsToSend, unitUpdate, markerInit, reactionInit)
+      end,
+      RAID_TARGET_UPDATE = function(_, eventsToSend)
         for unit in pairs(watchUnitChange.raidmark) do
-          markerUpdate(unit, eventsToSend)
+          handleUnit(unit, eventsToSend, markerUpdate)
         end
-      elseif event == "UNIT_FACTION" then
-        if watchUnitChange.trackedUnits[unit] then
-          reactionUpdate(unit, eventsToSend)
-        end
-      elseif event == "UNIT_PET" then
+      end,
+      UNIT_FACTION = function(unit, eventsToSend)
+        handleUnit(unit, eventsToSend, reactionUpdate)
+      end,
+      UNIT_PET = function(unit, eventsToSend)
         local pet = WeakAuras.unitToPetUnit[unit]
         if pet and watchUnitChange.trackedUnits[pet] then
           eventsToSend["UNIT_CHANGED_" .. pet] = pet
         end
-      elseif event == "PLAYER_ROLES_ASSIGNED" then
+      end,
+      PLAYER_ROLES_ASSIGNED = function(_, eventsToSend)
         for unit in pairs(Private.multiUnitUnits.group) do
-          if watchUnitChange.trackedUnits[unit] then
-            roleUpdate(unit, eventsToSend)
-          end
+          handleUnit(unit, eventsToSend, roleUpdate)
         end
-      elseif event == "UNIT_TARGET" then
-        local unitTarget = unit .. "target"
-        if not watchUnitChange.trackedUnits[unitTarget] then
-          Private.StopProfileSystem("generictrigger unit change");
-          return
-        end
-        unitUpdate(unitTarget, eventsToSend)
-        markerInit(unitTarget)
-        reactionInit(unitTarget)
-      elseif event == "GROUP_ROSTER_UPDATE" then
+      end,
+      UNIT_TARGET = function(unit, eventsToSend)
+        handleUnit(unit .. "target", eventsToSend, unitUpdate, markerInit, reactionInit)
+      end,
+      GROUP_ROSTER_UPDATE = function(_, eventsToSend)
         for unit in pairs(Private.multiUnitUnits.group) do
-          if watchUnitChange.trackedUnits[unit] then
-            unitUpdate(unit, eventsToSend)
-            markerInit(unit, eventsToSend)
-            reactionInit(unit, eventsToSend)
-          end
+          handleUnit(unit, eventsToSend, unitUpdate, markerInit, reactionInit)
         end
         local inRaid = IsInRaid()
         local inRaidChanged = inRaid ~= watchUnitChange.inRaid
@@ -3669,7 +3651,12 @@ function WeakAuras.WatchUnitChange(unit)
           watchUnitChange.inRaid = inRaid
         end
       end
+    }
 
+    watchUnitChange:SetScript("OnEvent", function(self, event, unit)
+      Private.StartProfileSystem("generictrigger unit change");
+      local eventsToSend = {}
+      handleEvent[event](unit, eventsToSend)
       -- send events
       for event, unit in pairs(eventsToSend) do
         WeakAuras.ScanEvents(event, unit)
@@ -3983,6 +3970,21 @@ do
         Private.StartProfileSystem("generictrigger pet update")
         WeakAuras.ScanEvents("PET_UPDATE", "pet")
         Private.StopProfileSystem("generictrigger pet update")
+      end)
+    end
+  end
+end
+
+do
+  local watchFrame
+  function Private.WatchCOMBO_TARGET_CHANGED()
+    if not watchFrame then
+      watchFrame = CreateFrame("Frame")
+      watchFrame:RegisterEvent("COMBO_TARGET_CHANGED")
+      watchFrame:SetScript("OnEvent", function()
+        Private.StartProfileSystem("generictrigger COMBO_TARGET_CHANGED")
+        WeakAuras.ScanEvents("WA_COMBO_TARGET_CHANGED", "player")
+        Private.StopProfileSystem("generictrigger COMBO_TARGET_CHANGED")
       end)
     end
   end
@@ -4392,7 +4394,7 @@ function GenericTrigger.GetAdditionalProperties(data, triggernum)
         enable = v.enable
       end
       if (enable and v.store and v.name and v.display and v.conditionType ~= "bool") then
-        table.insert(ret .. "|cFFFFCC00%".. triggernum .. "." .. v.name .. "|r - " .. v.display .. "\n")
+        table.insert(ret, "|cFFFFCC00%".. triggernum .. "." .. v.name .. "|r - " .. v.display .. "\n")
       end
     end
     if prototype.countEvents then
