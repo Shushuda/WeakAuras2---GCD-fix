@@ -126,6 +126,13 @@ globals = {
 	"TableHasAnyEntries",
 	"tIndexOf",
 	"UISpecialFrames",
+	"Vector2DMixin",
+	"Vector3DMixin",
+	"ItemLocationMixin",
+	"ItemTransmogInfoMixin",
+	"TransmogPendingInfoMixin",
+	"TransmogLocationMixin",
+	"PlayerLocationMixin",
 
 
 	-- FrameXML frames
@@ -142,6 +149,7 @@ globals = {
 	"ChatFontNormal",
 	"GameFontNormal",
 	"GameFontNormalHuge",
+	"GameFontNormalSmall2",
 	"GameFontHighlight",
 	"GameFontHighlightLarge",
 	"GameFontHighlightSmall",
@@ -3965,6 +3973,7 @@ globals = {
 	"table.sort",
 	"table.wipe",
 	"tan",
+	"tAppendAll",
 	"time",
 	"tinsert",
 	"tonumber",
@@ -4498,6 +4507,7 @@ globals = {
 	"LOOT_ROLL_TYPE_NEED",
 	"LOOT_ROLL_TYPE_GREED",
 	"LOOT_ROLL_TYPE_DISENCHANT",
+	"ICON_LIST",
 	"ITEM_INVENTORY_LOCATION_PLAYER",
 	"ITEM_INVENTORY_LOCATION_BAGS",
 	"ITEM_INVENTORY_LOCATION_BANK",
